@@ -1,0 +1,18 @@
+[project]
+name = "kraken-copybot"
+version = "0.1.0"
+description = "Leaderboard-driven copy-trading bot for Kraken spot"
+requires-python = ">=3.11"
+dependencies = ["requests>=2.31"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+copybot = "copybot.cli:main"
+
+[tool.setuptools]
+packages = ["copybot"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
