@@ -1,0 +1,38 @@
+# Copy this to config.toml and adjust. Every key is optional; defaults shown.
+mode = "paper"               # "paper" simulates fills; "live" places real Kraken orders
+quote = "USD"
+state_path = "state/bot_state.json"
+interval_seconds = 900       # seconds between cycles in `run`
+
+[leaderboard]
+min_account_value = 250000   # only follow accounts with >= this much capital
+min_month_roi = 0.0          # must be up over the last month
+min_all_time_pnl = 0.0       # and profitable all-time
+max_month_turnover = 300     # month volume / account value; filters market makers
+top_n = 10                   # how many top-ranked traders to copy
+include = []                 # addresses to always follow
+exclude = []                 # addresses to never follow
+
+[leaderboard.weights]        # score = weighted percentile rank among eligible traders
+month = 0.35                 # window name -> ROI over that window (day/week/month/allTime)
+allTime = 0.25
+week = 0.15
+pnl_allTime = 0.25           # pnl_<window> -> dollar PnL (rewards a large track record)
+
+[copy]
+min_traders_agree = 2        # buy a coin only if >= this many followed traders are long it
+exposure_scale = 1.0         # multiplier on consensus exposure
+max_position_pct = 0.25      # max fraction of equity in one coin
+max_total_exposure = 0.9     # max fraction of equity invested (rest stays cash)
+allowlist = []               # e.g. ["BTC", "ETH", "SOL"]; empty = any Kraken USD pair
+denylist = []
+
+[risk]
+allocation_usd = 1000        # capital the bot manages; it never sizes beyond this
+min_order_usd = 10
+rebalance_threshold = 0.02   # ignore drift smaller than 2% of equity
+max_orders_per_cycle = 10
+max_drawdown = 0.25          # halt when equity drops 25% from peak
+on_drawdown = "halt"         # or "flatten" to sell everything first
+paper_fee_rate = 0.004
+paper_slippage_bps = 10
