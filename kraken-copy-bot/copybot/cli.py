@@ -12,7 +12,7 @@ import time
 from .broker import LiveBroker, PaperBroker
 from .config import Config, load_config
 from .engine import CopyBot, CycleReport
-from .kraken import KrakenClient
+from .kraken import KrakenClient, build_universe
 from .leaderboard import HyperliquidClient, ineligibility_reason, parse_rows, select_followed
 from .state import BotState
 
@@ -32,6 +32,55 @@ def make_bot(cfg: Config, confirm_live: bool) -> CopyBot:
         kraken = KrakenClient()
         broker = PaperBroker(cfg.risk.paper_fee_rate, cfg.risk.paper_slippage_bps)
     return CopyBot(cfg, HyperliquidClient(), kraken, broker)
+
+
+def run_check(cfg: Config) -> int:
+    """Verify connectivity and Kraken credentials without placing any order."""
+    key, secret = os.environ.get("KRAKEN_API_KEY"), os.environ.get("KRAKEN_API_SECRET")
+    client = KrakenClient(key, secret)
+    broker = LiveBroker(client)
+    failures = 0
+    ctx: dict = {}
+
+    def step(name, fn):
+        nonlocal failures
+        try:
+            print(f"  ok    {name}: {fn()}")
+        except Exception as exc:
+            failures += 1
+            print(f"  FAIL  {name}: {exc}")
+
+    def universe():
+        ctx["universe"] = build_universe(client.asset_pairs(), cfg.quote)
+        return f"{len(ctx['universe'])} online {cfg.quote} spot pairs"
+
+    print("public:")
+    step("Kraken status", client.system_status)
+    step("Kraken markets", universe)
+    step("Hyperliquid leaderboard", lambda: f"{len(HyperliquidClient().leaderboard())} traders")
+
+    if not (key and secret):
+        print("private: skipped (set KRAKEN_API_KEY and KRAKEN_API_SECRET to check your key)")
+        return 1 if failures else 0
+
+    def balances():
+        usd, coins = broker.balances(ctx["universe"])
+        held = {c: q for c, q in coins.items() if q > 0}
+        note = "" if usd >= cfg.risk.allocation_usd else (
+            f" -- below allocation_usd ${cfg.risk.allocation_usd:,.2f}; buys will be capped"
+        )
+        return f"${usd:,.2f} {cfg.quote} available{note}; other holdings: {held or 'none'}"
+
+    def can_trade():
+        pair = ctx["universe"]["BTC"]
+        broker.validate_order(pair, "buy", pair.ordermin)
+        return f"validate-only buy of {pair.ordermin} BTC accepted (nothing was placed)"
+
+    print("private:")
+    step("balance (Query Funds)", balances)
+    step("order permission (Create & Modify Orders)", can_trade)
+    print("\nall checks passed" if not failures else f"\n{failures} check(s) failed")
+    return 1 if failures else 0
 
 
 def pct(x: float) -> str:
@@ -91,6 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("status", help="show the saved bot state")
     sub.add_parser("reset", help="clear a drawdown halt (keeps holdings and peak reset to current equity)")
     sub.add_parser("explain", help="show why top leaderboard traders were filtered out")
+    sub.add_parser("check", help="test connectivity and Kraken API key permissions (places no orders)")
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -114,6 +164,9 @@ def main(argv: list[str] | None = None) -> int:
         state.save(cfg.state_path)
         print("halt cleared; peak equity reset to last equity")
         return 0
+
+    if args.command == "check":
+        return run_check(cfg)
 
     bot = make_bot(cfg, getattr(args, "confirm_live", False))
 
