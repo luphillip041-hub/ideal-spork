@@ -1,0 +1,8 @@
+# Railway service config. Set the service's Root Directory to `kraken-copy-bot`.
+# The Dockerfile's CMD (`run`) is the start command; there is no web port.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+restartPolicyType = "ALWAYS"

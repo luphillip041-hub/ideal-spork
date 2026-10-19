@@ -111,6 +111,35 @@ docker run -d --name copybot --restart unless-stopped \
   kraken-copybot run --confirm-live      # omit --confirm-live for paper mode
 ```
 
+### Railway
+
+The repo includes a `railway.toml` and Dockerfile, so Railway can run the bot as an
+always-on worker. It has no web port, so don't add a domain.
+
+1. **New Project → Deploy from GitHub repo** and pick this repository.
+2. In the service's **Settings**, set **Root Directory** to `kraken-copy-bot`.
+3. **Add a Volume** to the service, mounted at `/app/state`. Without it, holdings,
+   the trade log, and the drawdown peak are wiped on every redeploy.
+4. Under **Variables**, add:
+
+   | Variable | Value | Notes |
+   |---|---|---|
+   | `RAILWAY_RUN_UID` | `0` | lets the bot write to the volume |
+   | `COPYBOT_MODE` | `paper` | switch to `live` when ready |
+   | `COPYBOT_ALLOCATION_USD` | e.g. `1000` | budget the bot manages |
+   | `KRAKEN_API_KEY` / `KRAKEN_API_SECRET` | your key | live only, no withdrawal permission |
+   | `COPYBOT_CONFIRM_LIVE` | `yes` | live only; the deliberate "real money" switch |
+
+   Optional: `COPYBOT_INTERVAL_SECONDS`, `COPYBOT_TOP_N`, `COPYBOT_MIN_TRADERS_AGREE`,
+   `COPYBOT_MAX_DRAWDOWN`, and `COPYBOT_STATE_PATH`. Any other setting can be changed
+   by editing `config.example.toml`, which is baked into the image as the default config.
+5. Deploy. Each cycle's report shows in the service's **Deploy Logs**.
+
+**Going from paper to live:** run `check` locally with your key first. Then change
+`COPYBOT_STATE_PATH` to a new file (for example `/app/state/live.json`) so paper
+holdings aren't treated as real, set `COPYBOT_MODE=live` and `COPYBOT_CONFIRM_LIVE=yes`,
+and redeploy.
+
 ## Configuration
 
 See [`config.example.toml`](config.example.toml). Every key is documented there
