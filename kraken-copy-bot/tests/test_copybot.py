@@ -287,3 +287,83 @@ def test_load_config_example_and_validation(tmp_path):
     bad.write_text('mode = "yolo"\n')
     with pytest.raises(ValueError):
         load_config(bad)
+
+
+# --- live broker (fake Kraken private API) ----------------------------------
+
+from copybot.broker import LiveBroker
+
+
+class FakePrivateKraken:
+    def __init__(self, statuses, balance=None):
+        self.statuses = list(statuses)  # successive QueryOrders statuses
+        self.balance_data = balance or {}
+        self.placed, self.cancelled = [], []
+
+    def balance(self):
+        return self.balance_data
+
+    def add_market_order(self, pair, side, volume, validate=False):
+        self.placed.append((pair.altname, side, volume, validate))
+        return [] if validate else ["TX1"]
+
+    def query_orders(self, txids):
+        status = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
+        filled = {"closed": "0.01", "canceled": "0.004"}.get(status, "0.004")
+        return {"TX1": {"status": status, "vol_exec": filled, "cost": str(float(filled) * 100_000),
+                        "fee": "1.5", "price": "100000"}}
+
+    def cancel_order(self, txid):
+        self.cancelled.append(txid)
+        self.statuses = ["canceled"]
+
+
+def test_live_broker_books_closed_fill():
+    client = FakePrivateKraken(["open", "closed"])
+    fill = LiveBroker(client, fill_timeout=5, poll_interval=0).execute(UNIVERSE["BTC"], "buy", 0.01, QUOTES["BTC"])
+    assert client.placed == [("XBTUSD", "buy", "0.01000000", False)]
+    assert (fill.volume, fill.cost, fill.fee, fill.txid) == (0.01, 1000.0, 1.5, "TX1")
+    assert client.cancelled == []
+
+
+def test_live_broker_cancels_unfilled_remainder():
+    client = FakePrivateKraken(["open"])
+    fill = LiveBroker(client, fill_timeout=0, poll_interval=0).execute(UNIVERSE["BTC"], "buy", 0.01, QUOTES["BTC"])
+    assert client.cancelled == ["TX1"]
+    assert fill.volume == 0.004  # only the part that actually filled is booked
+
+
+def test_live_broker_balances_merge_earn_and_usd_codes():
+    client = FakePrivateKraken(["closed"], {"ZUSD": 100.0, "USD.F": 5.0, "XXBT": 0.1, "XXBT.F": 0.05, "SOL": 2.0})
+    usd, coins = LiveBroker(client).balances(UNIVERSE)
+    assert usd == 105.0
+    assert coins["BTC"] == pytest.approx(0.15) and coins["SOL"] == 2.0 and coins["ETH"] == 0.0
+
+
+def test_live_broker_validate_places_nothing():
+    client = FakePrivateKraken(["closed"])
+    LiveBroker(client).validate_order(UNIVERSE["BTC"], "buy", 0.00005)
+    assert client.placed == [("XBTUSD", "buy", "0.00005000", True)]
+
+
+def test_live_cycle_clamps_sells_to_real_balance(tmp_path):
+    cfg = make_cfg(tmp_path)
+    make_bot(cfg, BOTH_LONG_BTC).run_cycle()  # paper-buy BTC into state
+    held = BotState.load(cfg.state_path, 1000).holdings["BTC"]
+
+    class Recorder(PaperBroker):
+        live = True
+        def __init__(self):
+            super().__init__(0.004, 10)
+            self.sold = []
+        def balances(self, universe):
+            return 10_000.0, {"BTC": held / 2}  # user moved half the BTC away
+        def execute(self, pair, side, volume, quote):
+            self.sold.append(volume)
+            return super().execute(pair, side, volume, quote)
+
+    broker = Recorder()
+    bot = CopyBot(cfg, FakeHL([row("0xa", 1e6, 0.5), row("0xb", 1e6, 0.4)],
+                              {"0xa": ch_state(1e6, []), "0xb": ch_state(1e6, [])}), FakeKraken(QUOTES), broker)
+    bot.run_cycle()
+    assert broker.sold == [round_down(held / 2, 8)]

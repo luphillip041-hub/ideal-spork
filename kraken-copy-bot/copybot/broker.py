@@ -64,6 +64,10 @@ class LiveBroker:
         coins = {coin: merged.get(p.base_asset, 0.0) for coin, p in universe.items()}
         return usd, coins
 
+    def validate_order(self, pair: PairInfo, side: str, volume: float) -> None:
+        """Ask Kraken to validate (not place) an order; raises if the key can't trade."""
+        self.client.add_market_order(pair, side, fmt_volume(volume, pair.lot_decimals), validate=True)
+
     def execute(self, pair: PairInfo, side: str, volume: float, quote: Quote) -> Fill:
         txids = self.client.add_market_order(pair, side, fmt_volume(volume, pair.lot_decimals))
         if not txids:
@@ -76,9 +80,17 @@ class LiveBroker:
             if order.get("status") in ("closed", "canceled", "expired"):
                 break
             time.sleep(self.poll_interval)
+        if order.get("status") not in ("closed", "canceled", "expired"):
+            # Never leave a stray order working: cancel the rest and book what filled.
+            log.warning("order %s still %s after %ss; cancelling remainder", txid, order.get("status"), self.fill_timeout)
+            try:
+                self.client.cancel_order(txid)
+            except KrakenAPIError as exc:
+                log.error("cancel of %s failed: %s", txid, exc)
+            order = self.client.query_orders([txid]).get(txid, order)
         vol_exec = float(order.get("vol_exec", 0) or 0)
         if order.get("status") != "closed":
-            log.warning("order %s not fully closed (status=%s, vol_exec=%s)", txid, order.get("status"), vol_exec)
+            log.warning("order %s ended %s with vol_exec=%s", txid, order.get("status"), vol_exec)
         cost = float(order.get("cost", 0) or 0)
         price = float(order.get("price", 0) or 0) or (cost / vol_exec if vol_exec else 0.0)
         return Fill(pair.coin, side, vol_exec, price, cost, float(order.get("fee", 0) or 0), txid=txid)

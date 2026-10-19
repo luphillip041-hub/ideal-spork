@@ -69,6 +69,7 @@ python -m copybot -c config.toml once            # one paper-trading cycle
 python -m copybot -c config.toml run             # loop every interval_seconds
 python -m copybot -c config.toml status          # cash, holdings, halt state
 python -m copybot -c config.toml reset           # clear a drawdown halt
+python -m copybot -c config.toml check           # test connectivity + API key (no orders)
 ```
 
 State is stored in `state/bot_state.json`, and every fill is appended to
@@ -80,14 +81,25 @@ State is stored in `state/bot_state.json`, and every fill is appended to
    and **Create & Modify Orders** only. Do **not** grant withdrawal permission.
 2. Fund the account with USD and set `risk.allocation_usd` to the amount the bot
    may use.
-3. Paper-trade first with your exact config, then use a **fresh** `state_path`
-   for live, so paper holdings aren't treated as real:
+3. Verify the key without trading. `check` reads your balance and has Kraken
+   *validate* a tiny BTC order without placing it:
 
 ```bash
 export KRAKEN_API_KEY=... KRAKEN_API_SECRET=...
-# config.toml: mode = "live", state_path = "state/live.json"
-python -m copybot -c config.toml once --confirm-live
+python -m copybot -c config.toml check
 ```
+
+4. Paper-trade first with your exact config, then switch to live with a **fresh**
+   `state_path`, so paper holdings aren't treated as real:
+
+```bash
+# config.toml: mode = "live", state_path = "state/live.json"
+python -m copybot -c config.toml plan                      # see what it would do
+python -m copybot -c config.toml once --confirm-live       # one real cycle
+```
+
+A market order that isn't fully filled within 30 seconds has the rest
+cancelled, and only the filled part is booked, so no order is ever left working.
 
 ### Docker
 
@@ -112,7 +124,9 @@ pip install pytest && python -m pytest -q
 
 The tests cover Kraken request signing (against Kraken's documented example),
 leaderboard filtering and scoring, consensus and caps, rebalance planning, full
-paper cycles, the incomplete-data guard, and both drawdown modes.
+paper cycles, the incomplete-data guard, both drawdown modes, and the live
+broker's fill booking, cancel-on-timeout, balance merging, and balance clamping
+(against a fake Kraken).
 
 ## Limitations
 - Spot only, so the bot is long-only. Shorts from copied traders mean "hold cash".

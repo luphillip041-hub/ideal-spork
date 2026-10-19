@@ -122,6 +122,12 @@ class KrakenClient:
             data["validate"] = "true"
         return self.private("AddOrder", data).get("txid", [])
 
+    def cancel_order(self, txid: str) -> dict:
+        return self.private("CancelOrder", {"txid": txid})
+
+    def system_status(self) -> str:
+        return self.public("SystemStatus")["status"]
+
     def query_orders(self, txids: list[str]) -> dict:
         return self.private("QueryOrders", {"txid": ",".join(txids), "trades": "false"})
 
