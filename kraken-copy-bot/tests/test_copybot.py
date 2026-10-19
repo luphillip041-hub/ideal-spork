@@ -367,3 +367,30 @@ def test_live_cycle_clamps_sells_to_real_balance(tmp_path):
                               {"0xa": ch_state(1e6, []), "0xb": ch_state(1e6, [])}), FakeKraken(QUOTES), broker)
     bot.run_cycle()
     assert broker.sold == [round_down(held / 2, 8)]
+
+
+def test_env_overrides(tmp_path):
+    import pathlib
+    example = pathlib.Path(__file__).parent.parent / "config.example.toml"
+    env = {"COPYBOT_MODE": "live", "COPYBOT_ALLOCATION_USD": "250", "COPYBOT_TOP_N": "5",
+           "COPYBOT_STATE_PATH": "/data/s.json", "COPYBOT_INTERVAL_SECONDS": " "}
+    cfg = load_config(example, env)
+    assert (cfg.mode, cfg.risk.allocation_usd, cfg.leaderboard.top_n, cfg.state_path) == ("live", 250.0, 5, "/data/s.json")
+    assert cfg.interval_seconds == 900  # blank values are ignored
+    with pytest.raises(ValueError, match="COPYBOT_TOP_N"):
+        load_config(example, {"COPYBOT_TOP_N": "ten"})
+    with pytest.raises(ValueError):
+        load_config(example, {"COPYBOT_MODE": "yolo"})  # still validated
+
+
+def test_live_mode_requires_confirmation(monkeypatch, tmp_path):
+    from copybot.cli import make_bot
+    cfg = make_cfg(tmp_path)
+    cfg.mode = "live"
+    monkeypatch.setenv("KRAKEN_API_KEY", "k")
+    monkeypatch.setenv("KRAKEN_API_SECRET", "c2VjcmV0")
+    monkeypatch.delenv("COPYBOT_CONFIRM_LIVE", raising=False)
+    with pytest.raises(SystemExit):
+        make_bot(cfg, confirm_live=False)
+    monkeypatch.setenv("COPYBOT_CONFIRM_LIVE", "yes")
+    assert isinstance(make_bot(cfg, confirm_live=False).broker, LiveBroker)

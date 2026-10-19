@@ -24,8 +24,9 @@ def make_bot(cfg: Config, confirm_live: bool) -> CopyBot:
         key, secret = os.environ.get("KRAKEN_API_KEY"), os.environ.get("KRAKEN_API_SECRET")
         if not (key and secret):
             sys.exit("live mode needs KRAKEN_API_KEY and KRAKEN_API_SECRET in the environment")
-        if not confirm_live:
-            sys.exit("live mode places real orders; re-run with --confirm-live to proceed")
+        if not (confirm_live or os.environ.get("COPYBOT_CONFIRM_LIVE", "").lower() in ("1", "yes", "true")):
+            sys.exit("live mode places real orders; re-run with --confirm-live "
+                     "(or set COPYBOT_CONFIRM_LIVE=yes) to proceed")
         kraken = KrakenClient(key, secret)
         broker = LiveBroker(kraken)
     else:

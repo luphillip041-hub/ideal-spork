@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
@@ -105,11 +106,37 @@ def _merge(obj, data: dict, path: str = ""):
     return obj
 
 
-def load_config(path: str | Path | None) -> Config:
+# Environment variables that override the config file, so hosted deployments
+# (Railway, Docker) can be tuned without editing or mounting a file.
+ENV_OVERRIDES = {
+    "COPYBOT_MODE": ("", "mode", str),
+    "COPYBOT_STATE_PATH": ("", "state_path", str),
+    "COPYBOT_INTERVAL_SECONDS": ("", "interval_seconds", int),
+    "COPYBOT_TOP_N": ("leaderboard", "top_n", int),
+    "COPYBOT_MIN_TRADERS_AGREE": ("copy", "min_traders_agree", int),
+    "COPYBOT_ALLOCATION_USD": ("risk", "allocation_usd", float),
+    "COPYBOT_MAX_DRAWDOWN": ("risk", "max_drawdown", float),
+}
+
+
+def apply_env_overrides(cfg: Config, env=os.environ) -> None:
+    for var, (section, key, cast) in ENV_OVERRIDES.items():
+        raw = env.get(var, "").strip()
+        if not raw:
+            continue
+        try:
+            value = cast(raw)
+        except ValueError:
+            raise ValueError(f"{var}={raw!r} is not a valid {cast.__name__}") from None
+        setattr(getattr(cfg, section) if section else cfg, key, value)
+
+
+def load_config(path: str | Path | None, env=os.environ) -> Config:
     cfg = Config()
     if path:
         with open(path, "rb") as fh:
             _merge(cfg, tomllib.load(fh))
+    apply_env_overrides(cfg, env)
     cfg.leaderboard.include = [a.lower() for a in cfg.leaderboard.include]
     cfg.leaderboard.exclude = [a.lower() for a in cfg.leaderboard.exclude]
     cfg.copy.allowlist = [c.upper() for c in cfg.copy.allowlist]
